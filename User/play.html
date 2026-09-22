@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Quiz in progress — Quiz Builder</title>
+<meta name="description" content="Answer the quiz questions before the timer runs out." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&display=swap" />
+<link rel="stylesheet" href="../Shared/styles.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+<header data-topbar></header>
+
+<main id="main" class="shell">
+  <div class="play-head">
+    <div>
+      <h1 id="quizTitle" style="margin-bottom:8px">Quiz</h1>
+      <p class="mb-0" id="progressLabel" aria-live="polite">Question 1 of 1</p>
+      <div class="progress-track" style="margin-top:10px" role="progressbar"
+           aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progressBar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+    </div>
+    <div class="timer" id="timer" role="timer" aria-live="off" aria-label="Time remaining">
+      <svg width="88" height="88" viewBox="0 0 88 88" aria-hidden="true">
+        <circle class="track" cx="44" cy="44" r="38" fill="none" stroke-width="8"></circle>
+        <circle class="bar" id="timerBar" cx="44" cy="44" r="38" fill="none" stroke-width="8"></circle>
+      </svg>
+      <span class="timer-text" id="timerText">0:00</span>
+    </div>
+  </div>
+
+  <section class="card">
+    <div id="stage" class="question-stage"></div>
+    <div class="play-nav">
+      <button class="btn btn-ghost" type="button" id="prevBtn">← Previous</button>
+      <div class="row" style="gap:10px">
+        <button class="btn btn-secondary" type="button" id="nextBtn">Next →</button>
+        <button class="btn btn-primary" type="button" id="submitBtn">Submit quiz</button>
+      </div>
+    </div>
+  </section>
+
+  <p class="text-center muted" style="margin-top:16px">
+    <a href="join.html" id="quitLink">Leave quiz</a>
+  </p>
+</main>
+
+<div class="overlay" id="overlay" hidden>
+  <div>
+    <div class="spinner" aria-hidden="true"></div>
+    <h2 id="overlayTitle">Great work!</h2>
+    <p id="overlayText">Scoring your answers…</p>
+  </div>
+</div>
+
+<script src="../Shared/storage.js"></script>
+<script src="../Shared/app.js"></script>
+<script>
+(function () {
+  QB.renderTopbar();
+
+  var state = QBStorage.getActiveAttempt();
+  var quiz = state ? QBStorage.getQuizById(state.quizId) : null;
+  if (!state || !quiz || !quiz.questions.length) { QB.go(QB.PATHS.join); return; }
+
+  var questions = quiz.questions;
+  var index = Math.min(Math.max(0, Number(state.index) || 0), questions.length - 1);
+  var answers = state.answers || {};
+  var endsAt = Number(state.endsAt) || (Date.now() + quiz.timeLimitSeconds * 1000);
+  var submitted = false;
+  var ticker = null;
+
+  var stage = QB.$("#stage");
+  QB.$("#quizTitle").textContent = quiz.title;
+  document.title = quiz.title + " — Quiz Builder";
+
+  var RADIUS = 38;
+  var CIRC = 2 * Math.PI * RADIUS;
+  var timerBar = QB.$("#timerBar");
+  timerBar.style.strokeDasharray = CIRC.toFixed(2);
+
+  function persist() {
+    if (submitted) return;
+    QBStorage.setActiveAttempt({
+      quizId: quiz.id, participantName: state.participantName,
+      answers: answers, index: index, endsAt: endsAt
+    });
+  }
+
+  /* ---------- timer ---------- */
+  function tick() {
+    var remaining = Math.max(0, Math.round((endsAt - Date.now()) / 1000));
+    var ratio = quiz.timeLimitSeconds ? remaining / quiz.timeLimitSeconds : 0;
+    timerBar.style.strokeDashoffset = (CIRC * (1 - ratio)).toFixed(2);
+    QB.$("#timerText").textContent = QB.formatTime(remaining);
+    QB.$("#timer").setAttribute("aria-label", "Time remaining " + QB.formatTime(remaining));
+    QB.$("#timer").classList.toggle("is-low", remaining <= 10);
+    if (remaining <= 0 && !submitted) finish(true);
+  }
+
+  /* ---------- rendering ---------- */
+  function renderQuestion() {
+    var q = questions[index];
+    stage.innerHTML = "";
+
+    var head = QB.el("div", { class: "stack" }, [
+      QB.el("h2", { id: "questionText", text: q.text })
+    ]);
+
+    var answerZone = QB.el("div", { class: "stack" });
+
+    if (q.type === "text") {
+      var input = QB.el("input", { type: "text", id: "textAnswer", maxlength: "160",
+        "aria-labelledby": "questionText", value: answers[q.id] || "", placeholder: "Type your answer" });
+      var counter = QB.el("p", { class: "counter", id: "textCounter", "aria-live": "polite", text: "0 / 160" });
+      function syncCounter() {
+        counter.textContent = input.value.length + " / 160";
+        counter.classList.toggle("is-over", input.value.length >= 160);
+      }
+      input.addEventListener("input", function () {
+        answers[q.id] = input.value;
+        syncCounter();
+        persist();
+      });
+      syncCounter();
+      answerZone.appendChild(input);
+      answerZone.appendChild(counter);
+    } else {
+      var group = QB.el("fieldset", { class: "answers" }, [
+        QB.el("legend", { class: "sr-only", text: "Answer options for: " + q.text })
+      ]);
+      var labels = q.type === "true-false" ? ["True", "False"] : q.options;
+      labels.forEach(function (optText, i) {
+        var value = q.type === "true-false" ? (i === 0 ? "true" : "false") : String(i);
+        var selected = String(answers[q.id]) === value;
+        var radio = QB.el("input", { type: "radio", name: "answer-" + q.id, value: value,
+          id: "opt-" + q.id + "-" + i });
+        radio.checked = selected;
+        radio.addEventListener("change", function () {
+          answers[q.id] = value;
+          QB.$$(".answer-card", group).forEach(function (c) {
+            c.classList.toggle("is-selected", c.querySelector("input").checked);
+          });
+          persist();
+        });
+        var card = QB.el("label", { class: "answer-card" + (selected ? " is-selected" : ""),
+          for: "opt-" + q.id + "-" + i }, [
+          radio,
+          QB.el("span", { class: "marker", "aria-hidden": "true", text: String.fromCharCode(65 + i) }),
+          QB.el("span", { class: "answer-text", text: optText })
+        ]);
+        group.appendChild(card);
+      });
+      answerZone.appendChild(group);
+    }
+
+    if (q.image) {
+      var media = QB.el("div", { class: "puzzle-media" }, [
+        QB.el("img", { src: q.image, alt: "Picture puzzle for question " + (index + 1) })
+      ]);
+      stage.appendChild(head);
+      stage.appendChild(QB.el("div", { class: "puzzle-layout", style: "margin-top:14px" }, [media, answerZone]));
+    } else {
+      stage.appendChild(head);
+      answerZone.style.marginTop = "14px";
+      stage.appendChild(answerZone);
+    }
+
+    QB.$("#progressLabel").textContent = "Question " + (index + 1) + " of " + questions.length;
+    var pct = Math.round(((index + 1) / questions.length) * 100);
+    QB.$("#progressFill").style.width = pct + "%";
+    QB.$("#progressBar").setAttribute("aria-valuenow", String(pct));
+
+    QB.$("#prevBtn").disabled = index === 0;
+    QB.$("#nextBtn").disabled = index === questions.length - 1;
+  }
+
+  function transitionTo(newIndex) {
+    if (newIndex < 0 || newIndex >= questions.length) return;
+    var delay = QB.prefersReducedMotion() ? 0 : 180;
+    stage.classList.add("is-leaving");
+    setTimeout(function () {
+      index = newIndex;
+      stage.classList.remove("is-leaving");
+      renderQuestion();
+      persist();
+    }, delay);
+  }
+
+  QB.$("#prevBtn").addEventListener("click", function () { transitionTo(index - 1); });
+  QB.$("#nextBtn").addEventListener("click", function () { transitionTo(index + 1); });
+  QB.$("#submitBtn").addEventListener("click", function () {
+    var unanswered = questions.filter(function (q) {
+      var a = answers[q.id];
+      return a === undefined || a === null || String(a).trim() === "";
+    }).length;
+    if (unanswered > 0 && !window.confirm(unanswered + " question(s) are unanswered. Submit anyway?")) return;
+    finish(false);
+  });
+
+  QB.$("#quitLink").addEventListener("click", function (e) {
+    if (!window.confirm("Leave the quiz? Your progress will be lost.")) { e.preventDefault(); return; }
+    QBStorage.clearActiveAttempt();
+  });
+
+  function finish(auto) {
+    if (submitted) return;
+    submitted = true;
+    if (ticker) clearInterval(ticker);
+
+    var result = QBStorage.scoreQuiz(quiz, answers);
+    var attempt = QBStorage.saveAttempt({
+      quizId: quiz.id, quizTitle: quiz.title, quizCode: quiz.code,
+      participantName: state.participantName, answers: answers,
+      result: result, autoSubmitted: !!auto
+    });
+    QBStorage.clearActiveAttempt();
+
+    var overlay = QB.$("#overlay");
+    QB.$("#overlayTitle").textContent = auto ? "Time's up!" : "Great work!";
+    QB.$("#overlayText").textContent = auto ? "Submitting your answers…" : "Scoring your answers…";
+    overlay.hidden = false;
+
+    setTimeout(function () {
+      QB.go(QB.PATHS.result, { attempt: attempt.id });
+    }, QB.prefersReducedMotion() ? 200 : 1100);
+  }
+
+  renderQuestion();
+  tick();
+  ticker = setInterval(tick, 1000);
+  persist();
+})();
+</script>
+</body>
+</html>

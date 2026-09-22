@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Your result — Quiz Builder</title>
+<meta name="description" content="See your quiz score, answer breakdown and feedback." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&display=swap" />
+<link rel="stylesheet" href="../Shared/styles.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+<header data-topbar></header>
+
+<main id="main" class="shell shell-narrow">
+  <section class="card text-center" id="resultCard">
+    <h1 id="resultHeading">Your result</h1>
+    <p id="resultQuiz" class="mb-0"></p>
+
+    <div class="score-ring" style="margin-top:18px">
+      <svg width="210" height="210" viewBox="0 0 210 210" aria-hidden="true">
+        <circle class="track" cx="105" cy="105" r="88" fill="none" stroke-width="14"></circle>
+        <circle class="bar" id="scoreBar" cx="105" cy="105" r="88" fill="none" stroke-width="14"></circle>
+      </svg>
+      <div class="score-ring-text">
+        <span class="score-percent" id="scorePercent">0%</span>
+        <span class="score-sub" id="scoreFraction">0 of 0</span>
+      </div>
+    </div>
+
+    <p id="feedback" style="font-weight:800; color:var(--mint-700); font-size:1.1rem"></p>
+
+    <div class="result-counts">
+      <div class="count-box"><strong id="countCorrect">0</strong>Correct</div>
+      <div class="count-box"><strong id="countWrong">0</strong>Incorrect</div>
+      <div class="count-box"><strong id="countSkipped">0</strong>Skipped</div>
+    </div>
+
+    <div class="row" style="justify-content:center">
+      <a class="btn btn-primary" href="join.html" id="playAgain">Play another quiz</a>
+      <a class="btn btn-ghost" href="../Authentication/index.html" id="creatorLink">Creator login</a>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="reviewHeading">
+    <h2 id="reviewHeading">Answer review</h2>
+    <div id="review"></div>
+  </section>
+</main>
+
+<script src="../Shared/storage.js"></script>
+<script src="../Shared/app.js"></script>
+<script>
+(function () {
+  QB.renderTopbar();
+
+  var attemptId = QB.query("attempt");
+  var attempt = attemptId ? QBStorage.getAttempt(attemptId) : null;
+  if (!attempt) {
+    var attempts = QBStorage.getAllAttempts();
+    attempt = attempts[attempts.length - 1] || null;
+  }
+  if (!attempt) { QB.go(QB.PATHS.join); return; }
+
+  var result = attempt.result || { total: 0, correct: 0, wrong: 0, skipped: 0, percent: 0, details: [] };
+
+  QB.$("#resultQuiz").textContent = attempt.quizTitle + " · " + attempt.participantName +
+    (attempt.autoSubmitted ? " · submitted when time ran out" : "");
+  QB.$("#scorePercent").textContent = result.percent + "%";
+  QB.$("#scoreFraction").textContent = result.correct + " of " + result.total;
+  QB.$("#countCorrect").textContent = String(result.correct);
+  QB.$("#countWrong").textContent = String(result.wrong);
+  QB.$("#countSkipped").textContent = String(result.skipped);
+
+  var feedback = result.percent >= 90 ? "Outstanding! You've really mastered this. 🌟"
+    : result.percent >= 70 ? "Well done — strong understanding. Keep it up! 💚"
+    : result.percent >= 50 ? "Good effort! A little revision and you'll nail it. 🌿"
+    : "Every attempt teaches you something. Try again and watch your score grow! 🌱";
+  QB.$("#feedback").textContent = feedback;
+
+  var R = 88, CIRC = 2 * Math.PI * R;
+  var bar = QB.$("#scoreBar");
+  bar.style.strokeDasharray = CIRC.toFixed(2);
+  bar.style.strokeDashoffset = CIRC.toFixed(2);
+  requestAnimationFrame(function () {
+    setTimeout(function () {
+      bar.style.strokeDashoffset = (CIRC * (1 - result.percent / 100)).toFixed(2);
+    }, QB.prefersReducedMotion() ? 0 : 160);
+  });
+
+  var review = QB.$("#review");
+  var quiz = QBStorage.getQuizById(attempt.quizId);
+
+  (result.details || []).forEach(function (d, i) {
+    var q = quiz ? quiz.questions.filter(function (x) { return x.id === d.questionId; })[0] : null;
+    var given = d.givenText || QBStorage.givenAnswerText(q || { type: d.type }, d.given);
+    var correctAnswer = d.correctText || (q ? QBStorage.correctAnswerText(q) : "");
+    var explanation = d.explanation || (q && q.explanation) || "";
+
+    var row = QB.el("div", { class: "review-row" }, [
+      QB.el("p", { style: "margin:0 0 4px; color:var(--ink); font-weight:700", text: (i + 1) + ". " + d.text }),
+      QB.el("p", { style: "margin:0", class: "muted", text: "Your answer: " + given })
+    ]);
+    if (!d.correct && correctAnswer) {
+      row.appendChild(QB.el("p", { style: "margin:2px 0 0; font-weight:700; color:var(--mint-700)", text: "Correct answer: " + correctAnswer }));
+    }
+    row.appendChild(QB.el("span", { class: d.correct ? "tag-ok" : "tag-no", text: d.correct ? "Correct" : "Not correct" }));
+    if (explanation) {
+      row.appendChild(QB.el("div", { class: "explain-box" }, [
+        QB.el("strong", { text: "Why: " }),
+        QB.el("span", { text: explanation })
+      ]));
+    }
+    review.appendChild(row);
+  });
+})();
+</script>
+</body>
+</html>

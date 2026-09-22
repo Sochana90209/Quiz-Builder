@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Participant Results — Quiz Builder</title>
+<link rel="stylesheet" href="../Shared/styles.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+<header data-topbar></header>
+<main id="main" class="shell">
+  <div class="welcome">
+    <h1>Participant Results</h1>
+    <p class="mb-0" id="quizInfo">Loading quiz results…</p>
+  </div>
+  <div class="quick-actions">
+    <a class="btn btn-ghost" href="dashboard.html">← Back to Dashboard</a>
+  </div>
+  <section class="card">
+    <h2>Quiz submissions</h2>
+    <p class="muted">Only attempts for a quiz owned by your account are shown.</p>
+    <div id="attemptList"></div>
+    <p id="empty" class="muted" hidden>No participants have submitted this quiz yet.</p>
+  </section>
+  <section class="card" id="detailCard" hidden>
+    <div class="row-between">
+      <h2 id="detailTitle" class="mb-0">Submission details</h2>
+      <button class="btn btn-ghost btn-sm" id="closeDetails" type="button">Close</button>
+    </div>
+    <div id="detailBody" class="stack" style="margin-top:12px"></div>
+  </section>
+</main>
+<script src="../Shared/storage.js"></script>
+<script src="../Shared/app.js"></script>
+<script>
+(function () {
+  QB.renderTopbar();
+  var session = QB.requireSession();
+  if (!session) return;
+  var quizId = QB.query("quiz");
+  var quiz = QBStorage.getQuizById(quizId);
+  var list = QB.$("#attemptList"), empty = QB.$("#empty");
+  var detailCard = QB.$("#detailCard"), detailBody = QB.$("#detailBody");
+
+  // Prevent creators from viewing another account's quiz submissions.
+  if (!quiz || quiz.ownerId !== session.id) {
+    QB.$("#quizInfo").textContent = "Quiz not found or you do not have permission to view its results.";
+    list.textContent = "";
+    return;
+  }
+  QB.$("#quizInfo").textContent = quiz.title + " · Code: " + quiz.code;
+
+  function answerText(detail, question) {
+    var given = detail.given;
+    if (given === null || given === undefined || String(given).trim() === "") return "Not answered";
+    if (!question) return String(given);
+    if (question.type === "multiple-choice") return question.options[Number(given)] !== undefined ? question.options[Number(given)] : String(given);
+    if (question.type === "true-false") return String(given).toLowerCase() === "true" ? "True" : "False";
+    return String(given);
+  }
+  function correctText(question) {
+    if (!question) return "Unavailable";
+    if (question.type === "multiple-choice") return question.options[Number(question.answer)] || "Unavailable";
+    if (question.type === "true-false") return String(question.answer).toLowerCase() === "true" ? "True" : "False";
+    return String(question.answer || "");
+  }
+  function showDetails(attempt) {
+    detailBody.innerHTML = "";
+    QB.$("#detailTitle").textContent = attempt.participantName + " — " + (attempt.result ? attempt.result.percent : 0) + "%";
+    var summary = QB.el("p", {class:"muted", text:"Submitted: " + new Date(attempt.submittedAt).toLocaleString()});
+    detailBody.appendChild(summary);
+    (attempt.result && attempt.result.details || []).forEach(function(d, i) {
+      var question = quiz.questions.filter(function(q){return q.id === d.questionId;})[0];
+      var explanation = d.explanation || (question && question.explanation) || "";
+      var block = QB.el("div",{class:"q-draft"},[
+        QB.el("div",{class:"q-draft-type",text:"Question " + (i+1)}),
+        QB.el("p",{text:d.text || (question && question.text) || "Question"}),
+        QB.el("p",{text:"Participant answer: " + answerText(d, question)}),
+        QB.el("p",{text:"Correct answer: " + correctText(question)}),
+        QB.el("span",{class:d.correct ? "tag-ok" : "tag-no",text:d.correct ? "Correct" : "Incorrect"})
+      ]);
+      if (explanation) {
+        block.appendChild(QB.el("div",{class:"explain-box"},[
+          QB.el("strong",{text:"Explanation you wrote: "}),
+          QB.el("span",{text:explanation})
+        ]));
+      }
+      detailBody.appendChild(block);
+    });
+    detailCard.hidden = false;
+    detailCard.scrollIntoView({behavior: QB.prefersReducedMotion() ? "auto" : "smooth", block:"start"});
+  }
+  var attempts = QBStorage.getAttemptsForQuiz(quiz.id).sort(function(a,b){return String(b.submittedAt).localeCompare(String(a.submittedAt));});
+  empty.hidden = attempts.length > 0;
+  attempts.forEach(function(attempt) {
+    var result = attempt.result || {};
+    var row = QB.el("div",{class:"q-draft"},[
+      QB.el("h3",{text:attempt.participantName || "Guest"}),
+      QB.el("p",{text:"Score: " + (result.correct || 0) + "/" + (result.total || quiz.questions.length) + " (" + (result.percent || 0) + "%)"}),
+      QB.el("p",{class:"muted",text:"Submitted: " + (attempt.submittedAt ? new Date(attempt.submittedAt).toLocaleString() : "Date unavailable")}),
+      QB.el("button",{class:"btn btn-secondary btn-sm",type:"button",text:"View Details",onclick:function(){showDetails(attempt);}})
+    ]);
+    list.appendChild(row);
+  });
+  QB.$("#closeDetails").addEventListener("click",function(){detailCard.hidden=true;});
+})();
+</script>
+</body>
+</html>

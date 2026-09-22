@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Create a quiz — Quiz Builder</title>
+<meta name="description" content="Build a quiz with multiple choice, true/false and text questions." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&display=swap" />
+<link rel="stylesheet" href="../Shared/styles.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+<header data-topbar></header>
+
+<main id="main" class="shell">
+  <div class="welcome">
+    <h1>Create a quiz</h1>
+    <p class="mb-0">Add details, build your questions, then publish to get a share code.</p>
+  </div>
+
+  <section class="card" aria-labelledby="detailsHeading">
+    <h2 id="detailsHeading">Quiz details</h2>
+    <div class="field">
+      <label for="quizTitle">Quiz title</label>
+      <input type="text" id="quizTitle" maxlength="90" required />
+      <p class="error-text" id="titleError" aria-live="polite"></p>
+    </div>
+    <div class="field">
+      <label for="quizDescription">Description <span class="muted">(optional)</span></label>
+      <textarea id="quizDescription" maxlength="240"></textarea>
+    </div>
+    <div class="field">
+      <label for="quizMinutes">Time limit (minutes)</label>
+      <input type="number" id="quizMinutes" min="1" max="120" step="1" value="5" />
+      <p class="error-text" id="timeError" aria-live="polite"></p>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="questionHeading">
+    <h2 id="questionHeading">Add a question</h2>
+    <div class="alert alert-error" id="questionError" role="alert" hidden></div>
+
+    <div class="field">
+      <label for="qType">Question type</label>
+      <select id="qType">
+        <option value="multiple-choice">Multiple choice</option>
+        <option value="true-false">True / False</option>
+        <option value="text">Text answer</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="qText">Question</label>
+      <textarea id="qText" maxlength="300" placeholder="What would you like to ask?"></textarea>
+    </div>
+
+    <div class="field" id="optionsField">
+      <span class="label" id="optionsLabel">Answer options</span>
+      <div id="optionsList" role="group" aria-labelledby="optionsLabel"></div>
+      <button class="btn btn-ghost btn-sm" type="button" id="addOption">+ Add option</button>
+    </div>
+
+    <div class="field" id="tfField" hidden>
+      <span class="label">Correct answer</span>
+      <div class="row">
+        <label class="answer-card" style="flex:1 1 140px">
+          <input type="radio" name="tfAnswer" value="true" checked />
+          <span class="marker" aria-hidden="true">T</span><span class="answer-text">True</span>
+        </label>
+        <label class="answer-card" style="flex:1 1 140px">
+          <input type="radio" name="tfAnswer" value="false" />
+          <span class="marker" aria-hidden="true">F</span><span class="answer-text">False</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="field" id="textField" hidden>
+      <label for="qTextAnswer">Accepted answer</label>
+      <input type="text" id="qTextAnswer" maxlength="120" placeholder="e.g. photosynthesis" />
+      <p class="hint">Separate alternatives with <code>|</code>. Capitalisation and extra spaces are ignored.</p>
+    </div>
+
+    <div class="field">
+      <label for="qImage">Image <span class="muted">(optional)</span></label>
+      <input type="file" id="qImage" accept="image/*" />
+      <p class="hint">Large images are resized automatically before saving.</p>
+      <div id="imagePreviewWrap" hidden style="margin-top:10px">
+        <img id="imagePreview" class="thumb" alt="Preview of the uploaded question image" />
+        <p style="margin-top:8px"><button class="btn btn-ghost btn-sm" type="button" id="removeImage">Remove image</button></p>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="qExplanation">Explanation <span class="muted">(shown to players after they submit)</span></label>
+      <textarea id="qExplanation" maxlength="400" placeholder="Explain why the correct answer is right, so players learn from a wrong answer."></textarea>
+      <p class="hint">Players see this on their results page next to each question.</p>
+    </div>
+
+    <button class="btn btn-secondary" type="button" id="addQuestion">Add question to quiz</button>
+  </section>
+
+  <section class="card" aria-labelledby="draftHeading">
+    <div class="row-between">
+      <h2 id="draftHeading" class="mb-0">Questions added</h2>
+      <span class="pill" id="draftCount">0</span>
+    </div>
+    <div id="draftList" style="margin-top:14px"></div>
+    <p class="muted" id="draftEmpty">No questions yet — add your first one above.</p>
+  </section>
+
+  <section class="card">
+    <div class="alert alert-error" id="publishError" role="alert" hidden></div>
+    <div class="row">
+      <button class="btn btn-primary" type="button" id="publishQuiz">Publish quiz</button>
+      <a class="btn btn-ghost" href="dashboard.html">Cancel</a>
+    </div>
+  </section>
+</main>
+
+<script src="../Shared/storage.js"></script>
+<script src="../Shared/app.js"></script>
+<script>
+(function () {
+  QB.renderTopbar();
+  var session = QB.requireSession();
+  if (!session) return;
+
+  var draft = [];
+  var currentImage = "";
+  var editingId = null;
+
+  /* Edit mode: ?quiz=<id> loads an existing quiz owned by this creator. */
+  var editingQuiz = null;
+  var editQuizId = QB.query("quiz");
+  if (editQuizId) {
+    var found = QBStorage.getQuizById(editQuizId);
+    if (!found || found.ownerId !== session.id) {
+      QB.toast("That quiz could not be opened for editing", "error");
+      QB.go(QB.PATHS.dashboard);
+      return;
+    }
+    editingQuiz = found;
+    document.title = "Edit quiz — Quiz Builder";
+    QB.$(".welcome h1").textContent = "Edit quiz";
+    QB.$(".welcome p").textContent = "Update the details or questions, then save. The share code stays the same.";
+    QB.$("#quizTitle").value = editingQuiz.title;
+    QB.$("#quizDescription").value = editingQuiz.description || "";
+    QB.$("#quizMinutes").value = String(Math.max(1, Math.round(editingQuiz.timeLimitSeconds / 60)));
+    QB.$("#publishQuiz").textContent = "Save changes";
+    draft = editingQuiz.questions.map(function (q) {
+      return { id: q.id, type: q.type, text: q.text, image: q.image, options: q.options.slice(), answer: q.answer, explanation: q.explanation || "" };
+    });
+  }
+
+  var typeSelect = QB.$("#qType");
+  var optionsList = QB.$("#optionsList");
+  var questionError = QB.$("#questionError");
+
+  function showQuestionError(msg) {
+    questionError.textContent = msg;
+    questionError.hidden = false;
+  }
+  function clearQuestionError() { questionError.hidden = true; }
+
+  /* ---------- options ---------- */
+  function optionRow(value, checked, index) {
+    var input = QB.el("input", { type: "text", maxlength: "120", value: value || "",
+      "aria-label": "Option " + (index + 1), "data-option-input": index });
+    var radio = QB.el("input", { type: "radio", name: "correctOption", value: index, "data-correct": index });
+    if (checked) radio.checked = true;
+    var remove = QB.el("button", { class: "btn btn-ghost btn-sm", type: "button", text: "✕",
+      "aria-label": "Remove option " + (index + 1), onclick: function () {
+        if (optionsList.children.length <= 2) { showQuestionError("A multiple choice question needs at least two options."); return; }
+        collectOptions();
+        optionValues.splice(index, 1);
+        if (correctIndex >= optionValues.length) correctIndex = 0;
+        renderOptions();
+      }
+    });
+    return QB.el("div", { class: "opt-row" }, [
+      input,
+      QB.el("div", { class: "row", style: "gap:6px" }, [
+        QB.el("label", { class: "correct-wrap" }, [radio, QB.el("span", { text: "Correct" })]),
+        remove
+      ])
+    ]);
+  }
+
+  var optionValues = ["", "", "", ""];
+  var correctIndex = 0;
+
+  function collectOptions() {
+    optionValues = QB.$$("[data-option-input]", optionsList).map(function (i) { return i.value; });
+    var checked = QB.$$("[data-correct]", optionsList).filter(function (r) { return r.checked; })[0];
+    correctIndex = checked ? Number(checked.value) : 0;
+  }
+
+  function renderOptions() {
+    optionsList.innerHTML = "";
+    optionValues.forEach(function (v, i) {
+      optionsList.appendChild(optionRow(v, i === correctIndex, i));
+    });
+  }
+
+  QB.$("#addOption").addEventListener("click", function () {
+    collectOptions();
+    if (optionValues.length >= 6) { showQuestionError("Up to 6 options are supported."); return; }
+    optionValues.push("");
+    renderOptions();
+  });
+
+  renderOptions();
+
+  /* ---------- type switching ---------- */
+  function syncType() {
+    var type = typeSelect.value;
+    QB.$("#optionsField").hidden = type !== "multiple-choice";
+    QB.$("#tfField").hidden = type !== "true-false";
+    QB.$("#textField").hidden = type !== "text";
+    clearQuestionError();
+  }
+  typeSelect.addEventListener("change", syncType);
+  syncType();
+
+  /* selected styling for true/false cards */
+  function syncTfCards() {
+    QB.$$("#tfField .answer-card").forEach(function (card) {
+      card.classList.toggle("is-selected", card.querySelector("input").checked);
+    });
+  }
+  QB.$$('input[name="tfAnswer"]').forEach(function (r) { r.addEventListener("change", syncTfCards); });
+  syncTfCards();
+
+  /* ---------- image ---------- */
+  QB.$("#qImage").addEventListener("change", function (e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    QB.readAndResizeImage(file, 900, 0.72).then(function (dataUrl) {
+      currentImage = dataUrl;
+      QB.$("#imagePreview").src = dataUrl;
+      QB.$("#imagePreviewWrap").hidden = false;
+      clearQuestionError();
+    }).catch(function (err) {
+      currentImage = "";
+      QB.$("#imagePreviewWrap").hidden = true;
+      showQuestionError(err.message || "Could not use that image.");
+    });
+  });
+
+  QB.$("#removeImage").addEventListener("click", function () {
+    currentImage = "";
+    QB.$("#qImage").value = "";
+    QB.$("#imagePreviewWrap").hidden = true;
+  });
+
+  /* ---------- draft questions ---------- */
+  function resetQuestionForm() {
+    QB.$("#qText").value = "";
+    QB.$("#qTextAnswer").value = "";
+    QB.$("#qExplanation").value = "";
+    optionValues = ["", "", "", ""];
+    correctIndex = 0;
+    renderOptions();
+    currentImage = "";
+    QB.$("#qImage").value = "";
+    QB.$("#imagePreviewWrap").hidden = true;
+    editingId = null;
+    QB.$("#addQuestion").textContent = "Add question to quiz";
+  }
+
+  function buildQuestion() {
+    var type = typeSelect.value;
+    var text = QB.$("#qText").value.trim();
+    if (!text) { showQuestionError("Please write the question text."); return null; }
+
+    var question = { id: editingId || QBStorage.uid("q"), type: type, text: text, image: currentImage, options: [], answer: "",
+      explanation: QB.$("#qExplanation").value.trim() };
+
+    if (type === "multiple-choice") {
+      collectOptions();
+      var filled = optionValues.map(function (v) { return v.trim(); });
+      var nonEmpty = filled.filter(Boolean);
+      if (nonEmpty.length < 2) { showQuestionError("Add at least two answer options."); return null; }
+      if (!filled[correctIndex]) { showQuestionError("The option marked correct cannot be empty."); return null; }
+      var correctText = filled[correctIndex];
+      question.options = filled.filter(Boolean);
+      question.answer = question.options.indexOf(correctText);
+    } else if (type === "true-false") {
+      var checked = QB.$$('input[name="tfAnswer"]').filter(function (r) { return r.checked; })[0];
+      question.options = ["True", "False"];
+      question.answer = checked ? checked.value : "true";
+    } else {
+      var ans = QB.$("#qTextAnswer").value.trim();
+      if (!ans) { showQuestionError("Please provide the accepted answer."); return null; }
+      question.answer = ans;
+    }
+    return question;
+  }
+
+  QB.$("#addQuestion").addEventListener("click", function () {
+    clearQuestionError();
+    var q = buildQuestion();
+    if (!q) return;
+    var existing = draft.findIndex(function (d) { return d.id === q.id; });
+    if (existing >= 0) { draft[existing] = q; QB.toast("Question updated"); }
+    else { draft.push(q); QB.toast("Question added"); }
+    resetQuestionForm();
+    renderDraft();
+  });
+
+  function editQuestion(id) {
+    var q = draft.filter(function (d) { return d.id === id; })[0];
+    if (!q) return;
+    editingId = q.id;
+    typeSelect.value = q.type;
+    syncType();
+    QB.$("#qText").value = q.text;
+    currentImage = q.image || "";
+    QB.$("#imagePreviewWrap").hidden = !currentImage;
+    if (currentImage) QB.$("#imagePreview").src = currentImage;
+    if (q.type === "multiple-choice") {
+      optionValues = q.options.slice();
+      while (optionValues.length < 2) optionValues.push("");
+      correctIndex = Number(q.answer) || 0;
+      renderOptions();
+    } else if (q.type === "true-false") {
+      QB.$$('input[name="tfAnswer"]').forEach(function (r) { r.checked = r.value === String(q.answer); });
+      syncTfCards();
+    } else {
+      QB.$("#qTextAnswer").value = q.answer;
+    }
+    QB.$("#qExplanation").value = q.explanation || "";
+    QB.$("#addQuestion").textContent = "Save changes";
+    QB.$("#qText").focus();
+  }
+
+  function renderDraft() {
+    var list = QB.$("#draftList");
+    list.innerHTML = "";
+    QB.$("#draftCount").textContent = String(draft.length);
+    QB.$("#draftEmpty").hidden = draft.length > 0;
+
+    draft.forEach(function (q, i) {
+      var summary = q.type === "text"
+        ? "Answer: " + q.answer
+        : (q.type === "true-false"
+            ? "Correct: " + (String(q.answer) === "true" ? "True" : "False")
+            : "Correct: " + q.options[Number(q.answer)]);
+
+      var block = QB.el("div", { class: "q-draft", "data-draft": q.id }, [
+        QB.el("div", { class: "q-draft-head" }, [
+          QB.el("span", { class: "q-draft-type", text: "Q" + (i + 1) + " · " + q.type.replace("-", " ") }),
+          QB.el("div", { class: "row", style: "gap:6px" }, [
+            QB.el("button", { class: "btn btn-ghost btn-sm", type: "button", text: "Edit",
+              onclick: function () { editQuestion(q.id); } }),
+            QB.el("button", { class: "btn btn-danger btn-sm", type: "button", text: "Remove",
+              onclick: function () {
+                draft = draft.filter(function (d) { return d.id !== q.id; });
+                if (editingId === q.id) resetQuestionForm();
+                renderDraft();
+              } })
+          ])
+        ]),
+        QB.el("p", { text: q.text }),
+        QB.el("p", { class: "muted", style: "margin:0", text: summary }),
+        QB.el("p", { class: "muted", style: "margin:4px 0 0", text: q.explanation ? "Explanation: " + q.explanation : "No explanation added yet." })
+      ]);
+      if (q.image) block.appendChild(QB.el("img", { class: "thumb", src: q.image, alt: "Image attached to question " + (i + 1) }));
+      list.appendChild(block);
+    });
+  }
+
+  renderDraft();
+
+  /* ---------- publish ---------- */
+  QB.$("#publishQuiz").addEventListener("click", function () {
+    var publishError = QB.$("#publishError");
+    publishError.hidden = true;
+    QB.$("#titleError").textContent = "";
+    QB.$("#timeError").textContent = "";
+
+    var title = QB.$("#quizTitle").value.trim();
+    var minutes = Number(QB.$("#quizMinutes").value);
+    var bad = false;
+
+    if (!title) { QB.$("#titleError").textContent = "Give your quiz a title."; bad = true; }
+    if (!isFinite(minutes) || minutes < 1 || minutes > 120) { QB.$("#timeError").textContent = "Choose between 1 and 120 minutes."; bad = true; }
+    if (!draft.length) {
+      publishError.textContent = "Add at least one question before publishing.";
+      publishError.hidden = false;
+      bad = true;
+    }
+    if (bad) {
+      if (!publishError.hidden) publishError.scrollIntoView({ block: "center" });
+      return;
+    }
+
+    var quiz = QBStorage.saveQuiz({
+      id: editingQuiz ? editingQuiz.id : undefined,
+      code: editingQuiz ? editingQuiz.code : QBStorage.uniqueCode(),
+      createdAt: editingQuiz ? editingQuiz.createdAt : undefined,
+      title: title,
+      description: QB.$("#quizDescription").value.trim(),
+      ownerId: session.id,
+      ownerName: session.name,
+      timeLimitSeconds: Math.round(minutes * 60),
+      questions: draft
+    });
+
+    QB.toast(editingQuiz ? "Changes saved — code " + quiz.code : "Quiz published — code " + quiz.code);
+    QB.go(QB.PATHS.dashboard);
+  });
+})();
+</script>
+</body>
+</html>

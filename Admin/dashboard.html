@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dashboard — Quiz Builder</title>
+<meta name="description" content="Your quizzes, statistics and quick actions in Quiz Builder." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&display=swap" />
+<link rel="stylesheet" href="../Shared/styles.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+<header data-topbar></header>
+
+<main id="main" class="shell">
+  <div class="welcome">
+    <h1 id="welcomeTitle">Welcome back</h1>
+    <p id="welcomeSub" class="mb-0">Here's how your quizzes are doing.</p>
+  </div>
+
+  <section aria-labelledby="statsHeading">
+    <h2 id="statsHeading" class="sr-only">Statistics</h2>
+    <div class="stats" id="stats"></div>
+  </section>
+
+  <section aria-labelledby="actionsHeading">
+    <h2 id="actionsHeading" class="sr-only">Quick actions</h2>
+    <div class="quick-actions">
+      <a class="btn btn-primary" id="actionCreate" href="create.html">+ Create quiz</a>
+      <a class="btn btn-primary" id="actionJoin" href="../User/join.html">Join a quiz</a>
+      <button class="btn btn-ghost" type="button" id="actionCopyLatest">Copy latest code</button>
+    </div>
+  </section>
+
+  <section aria-labelledby="quizzesHeading">
+    <div class="row-between" style="margin-bottom:12px">
+      <h2 id="quizzesHeading" class="mb-0">Your quizzes</h2>
+      <span class="pill" id="quizCount">0 quizzes</span>
+    </div>
+    <div class="quiz-grid" id="quizGrid"></div>
+    <div class="empty-state" id="emptyState" hidden>
+      <div class="empty-emoji" aria-hidden="true">🌱</div>
+      <h3>No quizzes yet</h3>
+      <p>Create your first quiz and share the code with your class.</p>
+      <a class="btn btn-primary" href="create.html">Create your first quiz</a>
+    </div>
+  </section>
+
+  <section class="card" id="previewCard" hidden aria-labelledby="previewHeading">
+    <div class="row-between">
+      <h2 id="previewHeading" class="mb-0">Quiz preview</h2>
+      <button class="btn btn-ghost btn-sm" type="button" id="closePreview">Close</button>
+    </div>
+    <div id="previewBody" class="stack" style="margin-top:12px"></div>
+  </section>
+</main>
+
+<script src="../Shared/storage.js"></script>
+<script src="../Shared/app.js"></script>
+<script>
+(function () {
+  QB.renderTopbar();
+  var session = QB.requireSession();
+  if (!session) return;
+
+  var grid = QB.$("#quizGrid");
+  var empty = QB.$("#emptyState");
+  var previewCard = QB.$("#previewCard");
+  var previewBody = QB.$("#previewBody");
+
+  QB.$("#welcomeTitle").textContent = "Welcome back, " + session.name + " 👋";
+
+  function stat(value, label, delay) {
+    var node = QB.el("div", { class: "stat" }, [
+      QB.el("div", { class: "stat-value", text: String(value) }),
+      QB.el("div", { class: "stat-label", text: label })
+    ]);
+    node.style.animationDelay = delay + "ms";
+    return node;
+  }
+
+  function render() {
+    var quizzes = QBStorage.getQuizzesByOwner(session.id);
+    var attempts = QBStorage.getAllAttempts().filter(function (a) {
+      return quizzes.some(function (q) { return q.id === a.quizId; });
+    });
+    var questionTotal = quizzes.reduce(function (sum, q) { return sum + q.questions.length; }, 0);
+    var avg = attempts.length
+      ? Math.round(attempts.reduce(function (s, a) { return s + (a.result ? a.result.percent : 0); }, 0) / attempts.length)
+      : 0;
+
+    var stats = QB.$("#stats");
+    stats.innerHTML = "";
+    stats.appendChild(stat(quizzes.length, "Quizzes created", 0));
+    stats.appendChild(stat(questionTotal, "Questions written", 60));
+    stats.appendChild(stat(attempts.length, "Attempts recorded", 120));
+    stats.appendChild(stat(avg + "%", "Average score", 180));
+
+    QB.$("#quizCount").textContent = quizzes.length + (quizzes.length === 1 ? " quiz" : " quizzes");
+    QB.$("#actionCopyLatest").disabled = quizzes.length === 0;
+
+    grid.innerHTML = "";
+    empty.hidden = quizzes.length > 0;
+
+    quizzes.forEach(function (quiz, i) {
+      var attemptsForQuiz = QBStorage.getAttemptsForQuiz(quiz.id).length;
+      var card = QB.el("article", { class: "quiz-card" }, [
+        QB.el("h3", { text: quiz.title }),
+        QB.el("p", { class: "mb-0", text: quiz.description || "No description added." }),
+        QB.el("div", { class: "quiz-meta" }, [
+          QB.el("span", { class: "pill pill-code", text: quiz.code }),
+          QB.el("span", { class: "pill", text: quiz.questions.length + " questions" }),
+          QB.el("span", { class: "pill", text: QB.formatTime(quiz.timeLimitSeconds) + " limit" }),
+          QB.el("span", { class: "pill", text: attemptsForQuiz + " attempts" })
+        ]),
+        QB.el("div", { class: "card-actions" }, [
+          QB.el("button", {
+            class: "btn btn-secondary btn-sm", type: "button", "data-preview": quiz.id,
+            text: "Preview", onclick: function () { showPreview(quiz.id); }
+          }),
+          QB.el("button", {
+            class: "btn btn-ghost btn-sm", type: "button", "data-copy": quiz.id,
+            text: "Copy code",
+            onclick: function () {
+              QB.copyText(quiz.code).then(function () { QB.toast("Code " + quiz.code + " copied"); })
+                .catch(function () { QB.toast("Code: " + quiz.code); });
+            }
+          }),
+          QB.el("a", { class: "btn btn-secondary btn-sm", href: "create.html?quiz=" + encodeURIComponent(quiz.id), text: "Edit quiz" }),
+          QB.el("a", { class: "btn btn-ghost btn-sm", href: "../User/join.html?code=" + quiz.code, text: "Play" }),
+          QB.el("a", { class: "btn btn-primary btn-sm", href: "creator-results.html?quiz=" + encodeURIComponent(quiz.id), text: "View Results (" + attemptsForQuiz + ")" }),
+          QB.el("button", {
+            class: "btn btn-danger btn-sm", type: "button", "data-delete": quiz.id,
+            text: "Delete",
+            onclick: function () {
+              if (!window.confirm('Delete "' + quiz.title + '"? This cannot be undone.')) return;
+              QBStorage.deleteQuiz(quiz.id);
+              previewCard.hidden = true;
+              QB.toast("Quiz deleted");
+              render();
+            }
+          })
+        ])
+      ]);
+      card.style.animationDelay = Math.min(i * 60, 360) + "ms";
+      grid.appendChild(card);
+    });
+  }
+
+  function showPreview(id) {
+    var quiz = QBStorage.getQuizById(id);
+    if (!quiz) return;
+    previewBody.innerHTML = "";
+    previewBody.appendChild(QB.el("h3", { text: quiz.title }));
+    previewBody.appendChild(QB.el("p", { text: quiz.description || "No description added." }));
+    previewBody.appendChild(QB.el("p", { class: "muted", text: "Code " + quiz.code + " · " + quiz.questions.length + " questions · " + QB.formatTime(quiz.timeLimitSeconds) }));
+    quiz.questions.forEach(function (q, i) {
+      var block = QB.el("div", { class: "q-draft" }, [
+        QB.el("div", { class: "q-draft-type", text: "Q" + (i + 1) + " · " + q.type.replace("-", " ") }),
+        QB.el("p", { text: q.text })
+      ]);
+      if (q.image) block.appendChild(QB.el("img", { class: "thumb", src: q.image, alt: "Image for question " + (i + 1) }));
+      if (q.type === "text") {
+        block.appendChild(QB.el("p", { class: "muted", text: "Accepted answer: " + q.answer }));
+      } else {
+        var list = QB.el("ul", { style: "margin:6px 0 0; padding-left:18px" });
+        q.options.forEach(function (opt, oi) {
+          var correct = q.type === "true-false"
+            ? String(q.answer) === (oi === 0 ? "true" : "false")
+            : oi === Number(q.answer);
+          list.appendChild(QB.el("li", { text: opt + (correct ? "  ✓ correct" : "") }));
+        });
+        block.appendChild(list);
+      }
+      previewBody.appendChild(block);
+    });
+    previewCard.hidden = false;
+    previewCard.scrollIntoView({ behavior: QB.prefersReducedMotion() ? "auto" : "smooth", block: "start" });
+  }
+
+  QB.$("#closePreview").addEventListener("click", function () { previewCard.hidden = true; });
+
+  QB.$("#actionCopyLatest").addEventListener("click", function () {
+    var quizzes = QBStorage.getQuizzesByOwner(session.id);
+    if (!quizzes.length) { QB.toast("Create a quiz first", "error"); return; }
+    var code = quizzes[0].code;
+    QB.copyText(code).then(function () { QB.toast("Code " + code + " copied"); })
+      .catch(function () { QB.toast("Code: " + code); });
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

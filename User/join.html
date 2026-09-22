@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Join a quiz — Quiz Builder</title>
+<meta name="description" content="Enter your quiz code to start playing." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&display=swap" />
+<link rel="stylesheet" href="../Shared/styles.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+<header data-topbar></header>
+
+<main id="main" class="shell shell-narrow">
+  <div class="text-center" style="margin-bottom:18px">
+    <h1>Join a quiz</h1>
+    <p>Type the 6-character code your teacher shared with you.</p>
+  </div>
+
+  <section class="card">
+    <div class="alert alert-error" id="joinError" role="alert" hidden></div>
+    <form id="joinForm" novalidate>
+      <div class="field">
+        <label for="code">Quiz code</label>
+        <input type="text" id="code" class="code-input" maxlength="6" autocomplete="off"
+               spellcheck="false" aria-describedby="codeHint" required />
+        <p class="hint" id="codeHint">For example: 7QK2MP</p>
+        <p class="error-text" id="codeError" aria-live="polite"></p>
+      </div>
+      <div class="field">
+        <label for="playerName">Your name <span class="muted">(optional)</span></label>
+        <input type="text" id="playerName" maxlength="40" autocomplete="name" />
+      </div>
+      <button class="btn btn-primary btn-block" type="submit" id="findQuiz">Find quiz</button>
+    </form>
+  </section>
+
+  <section class="card" id="instructions" hidden aria-labelledby="quizFoundTitle">
+    <h2 id="quizFoundTitle">Quiz found</h2>
+    <p id="quizSummary" class="mb-0"></p>
+    <div class="panel" style="margin:16px 0">
+      <h3 style="font-size:1rem">How it works</h3>
+      <ul style="margin:0; padding-left:20px; color:var(--ink-soft)">
+        <li>Answer the questions one at a time — you can go back and change answers.</li>
+        <li>Your answers are saved as you go.</li>
+        <li>The timer runs for the whole quiz and submits automatically at zero.</li>
+      </ul>
+    </div>
+    <button class="btn btn-primary btn-block" type="button" id="startQuiz">Start quiz</button>
+  </section>
+</main>
+
+<script src="../Shared/storage.js"></script>
+<script src="../Shared/app.js"></script>
+<script>
+(function () {
+  QB.renderTopbar();
+
+  var codeInput = QB.$("#code");
+  var found = null;
+
+  var preset = QB.query("code");
+  if (preset) codeInput.value = String(preset).toUpperCase();
+
+  codeInput.addEventListener("input", function () {
+    codeInput.value = codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  });
+
+  QB.$("#joinForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var joinError = QB.$("#joinError");
+    joinError.hidden = true;
+    QB.$("#codeError").textContent = "";
+    QB.$("#instructions").hidden = true;
+
+    var code = codeInput.value.trim();
+    if (!code) { QB.$("#codeError").textContent = "Please enter a quiz code."; return; }
+    if (code.length < 4) { QB.$("#codeError").textContent = "Quiz codes are 6 characters long."; return; }
+
+    var quiz = QBStorage.getQuizByCode(code);
+    if (!quiz) {
+      joinError.textContent = "No quiz found with code " + code + ". Please check and try again.";
+      joinError.hidden = false;
+      return;
+    }
+    if (!quiz.questions.length) {
+      joinError.textContent = "That quiz has no questions yet.";
+      joinError.hidden = false;
+      return;
+    }
+
+    found = quiz;
+    QB.$("#quizFoundTitle").textContent = quiz.title;
+    QB.$("#quizSummary").textContent = (quiz.description ? quiz.description + " · " : "") +
+      quiz.questions.length + " questions · " + QB.formatTime(quiz.timeLimitSeconds) + " to finish";
+    QB.$("#instructions").hidden = false;
+    QB.$("#startQuiz").focus();
+  });
+
+  QB.$("#startQuiz").addEventListener("click", function () {
+    if (!found) return;
+    QBStorage.clearActiveAttempt();
+    QBStorage.setActiveAttempt({
+      quizId: found.id,
+      participantName: QB.$("#playerName").value.trim() || "Guest",
+      answers: {},
+      index: 0,
+      endsAt: Date.now() + found.timeLimitSeconds * 1000
+    });
+    QB.go(QB.PATHS.play);
+  });
+})();
+</script>
+</body>
+</html>
